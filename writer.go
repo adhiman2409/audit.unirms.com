@@ -131,11 +131,15 @@ func mongoInsert(client *mongo.Client) func(context.Context, string, []any) erro
 		collection := client.Database(strings.ReplaceAll(domain, ".", "_")).Collection("audit_logs")
 		if !seen[domain] {
 			seen[domain] = true
+			// v0.1.2 and earlier kept config records forever and expired requests
+			// after 365 days. Drop that index so audit_ttl_90d can replace it; the
+			// error when it is already gone is expected.
+			_, _ = collection.Indexes().DropOne(ctx, "audit_ttl")
 			_, err := collection.Indexes().CreateMany(ctx, []mongo.IndexModel{
 				{Keys: bson.D{{Key: "at", Value: -1}}, Options: options.Index().SetName("audit_by_time")},
 				{Keys: bson.D{{Key: "actor_id", Value: 1}, {Key: "at", Value: -1}}, Options: options.Index().SetName("audit_by_actor")},
 				{Keys: bson.D{{Key: "kind", Value: 1}, {Key: "at", Value: -1}}, Options: options.Index().SetName("audit_by_kind")},
-				{Keys: bson.D{{Key: "at", Value: 1}}, Options: options.Index().SetName("audit_ttl").SetExpireAfterSeconds(365 * 24 * 60 * 60).SetPartialFilterExpression(bson.D{{Key: "kind", Value: "request"}})},
+				{Keys: bson.D{{Key: "at", Value: 1}}, Options: options.Index().SetName("audit_ttl_90d").SetExpireAfterSeconds(90 * 24 * 60 * 60)},
 			})
 			if err != nil {
 				log.Printf("audit: index creation failed for %s: %v", domain, err)

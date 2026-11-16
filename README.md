@@ -25,6 +25,6 @@ from the same `DB_ADDR`, `DB_PORT`, `DB_USER` and `DB_PASSWORD` the services use
 The session cookie is `Secure`, so serve it over HTTPS (localhost also works).
 
 ```bash
-docker buildx build --platform linux/amd64 -t hs14/audit-viewer:0.1.0 --push .
+docker buildx build --platform linux/amd64 -t hs14/audit-viewer:0.1.1 --push .
 microk8s kubectl apply -f deploy/viewer.yaml   # see the secret note at the top
 ```

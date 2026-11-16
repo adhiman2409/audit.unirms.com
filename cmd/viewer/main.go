@@ -30,18 +30,21 @@ import (
 var page []byte
 
 const (
-	cookieName = "audit_session"
-	sessionTTL = 12 * time.Hour
-	pageSize   = 100
+	cookieName  = "audit_session"
+	sessionTTL  = 12 * time.Hour
+	pageSize    = 100
+	maxFailures = 5
 )
 
 var dbName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,63}$`)
 
 type server struct {
-	client     *mongo.Client
-	user, pass [sha256.Size]byte
-	key        []byte
-	loginLock  sync.Mutex
+	client      *mongo.Client
+	user, pass  [sha256.Size]byte
+	key         []byte
+	loginLock   sync.Mutex
+	windowStart time.Time
+	failures    int
 }
 
 func main() {
@@ -105,18 +108,17 @@ func (s *server) routes() http.Handler {
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	user, pass := sha256.Sum256([]byte(r.FormValue("username"))), sha256.Sum256([]byte(r.FormValue("password")))
-	ok := subtle.ConstantTimeCompare(user[:], s.user[:]) & subtle.ConstantTimeCompare(pass[:], s.pass[:])
-	if ok != 1 {
-		// ponytail: one global lock means at most one wrong guess per second
-		// for everybody. Move to per-IP limits if that ever locks out real users.
-		s.loginLock.Lock()
-		time.Sleep(time.Second)
-		s.loginLock.Unlock()
-		log.Printf("viewer: failed sign-in from %s", clientIP(r))
+	ok := subtle.ConstantTimeCompare(user[:], s.user[:])&subtle.ConstantTimeCompare(pass[:], s.pass[:]) == 1
+	if !s.allow(ok, time.Now()) {
+		http.Error(w, "too many wrong attempts, wait a minute", http.StatusTooManyRequests)
+		return
+	}
+	if !ok {
+		log.Printf("viewer: failed sign-in from %q", clientIP(r))
 		http.Error(w, "wrong username or password", http.StatusUnauthorized)
 		return
 	}
-	log.Printf("viewer: sign-in from %s", clientIP(r))
+	log.Printf("viewer: sign-in from %q", clientIP(r))
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: s.sign(time.Now().Add(sessionTTL)), Path: "/",
 		MaxAge: int(sessionTTL.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
@@ -124,9 +126,31 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// allow reports whether this sign-in attempt may be answered. After
+// maxFailures wrong attempts in a minute every attempt is refused, right or
+// wrong, so parallel guesses cannot slip a correct one past the limit.
+// ponytail: the limit is global, so an attacker can block sign-in (not open
+// sessions) for everybody. Key it per client if that ever happens.
+func (s *server) allow(ok bool, now time.Time) bool {
+	s.loginLock.Lock()
+	defer s.loginLock.Unlock()
+	if now.Sub(s.windowStart) > time.Minute {
+		s.windowStart, s.failures = now, 0
+	}
+	if s.failures >= maxFailures {
+		return false
+	}
+	if !ok {
+		s.failures++
+	}
+	return true
+}
+
+// clientIP is for the sign-in log only. The ingress appends the address it saw
+// as the last X-Forwarded-For entry; anything before that is client-supplied.
 func clientIP(r *http.Request) string {
 	if f := r.Header.Get("X-Forwarded-For"); f != "" {
-		return f
+		return strings.TrimSpace(f[strings.LastIndex(f, ",")+1:])
 	}
 	return r.RemoteAddr
 }

@@ -40,3 +40,18 @@ func TestLogFilter(t *testing.T) {
 		t.Errorf("unknown kind reached the filter: %v", f)
 	}
 }
+
+func TestSignInLimit(t *testing.T) {
+	s, now := &server{}, time.Now()
+	for i := 0; i < maxFailures; i++ {
+		if !s.allow(false, now) {
+			t.Fatalf("attempt %d refused early", i)
+		}
+	}
+	if s.allow(true, now) {
+		t.Fatal("correct password accepted while locked")
+	}
+	if !s.allow(true, now.Add(61*time.Second)) {
+		t.Fatal("still locked after the window")
+	}
+}

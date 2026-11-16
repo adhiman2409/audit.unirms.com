@@ -134,7 +134,8 @@ func TestRecordContents(t *testing.T) {
 		_, _ = io.WriteString(w, `{"message":"invalid item"}`)
 	})
 	r := request("PATCH", validClaims, "")
-	r.Header.Set("X-Forwarded-For", " 203.0.113.1, 192.0.2.1")
+	r.Header.Add("X-Forwarded-For", "10.0.0.9")
+	r.Header.Add("X-Forwarded-For", " 203.0.113.1, 198.51.100.7 ")
 	before := time.Now()
 	router.ServeHTTP(httptest.NewRecorder(), r)
 	after := time.Now()
@@ -150,7 +151,7 @@ func TestRecordContents(t *testing.T) {
 	if rec.ActorID != "actor-1" || rec.ActorName != "Ada" || rec.ActorEmail != "ada@example.com" || rec.ActorRole != "admin" || rec.Department != "ops" || rec.Domain != "example.com" {
 		t.Fatalf("wrong actor fields: %+v", rec)
 	}
-	if rec.Kind != "request" || rec.CorrelationID != "correlation-123" || rec.Error != "invalid item" || rec.IP != "203.0.113.1" {
+	if rec.Kind != "request" || rec.CorrelationID != "correlation-123" || rec.Error != "invalid item" || rec.IP != "198.51.100.7" {
 		t.Fatalf("wrong response fields: %+v", rec)
 	}
 	if rec.At.Location() != time.UTC || rec.At.Before(before) || rec.At.After(after) || rec.DurationMS < 2 || rec.rawBody != nil || rec.rawError != nil {
@@ -172,6 +173,7 @@ func TestBodyCapture(t *testing.T) {
 		truncated               bool
 	}{
 		{"redacted", "application/json; charset=utf-8", `{"outer":{"PassWord":"p","items":[{"TOKEN":"t","secret":{"a":1},"Otp":123,"keep":true}]}}`, map[string]any{"outer": map[string]any{"PassWord": "[redacted]", "items": []any{map[string]any{"TOKEN": "[redacted]", "secret": "[redacted]", "Otp": "[redacted]", "keep": true}}}}, false},
+		{"redacted-variants", "application/json", `{"smtp_password":"p","api-key":"k","clientSecret":"s","access.token":"t","otp_code":1,"userOtp":2,"Credentials":{"a":1},"key":"field","footprint":3,"notPublic":true}`, map[string]any{"smtp_password": "[redacted]", "api-key": "[redacted]", "clientSecret": "[redacted]", "access.token": "[redacted]", "otp_code": "[redacted]", "userOtp": "[redacted]", "Credentials": "[redacted]", "key": "field", "footprint": float64(3), "notPublic": true}, false},
 		{"limit", "application/json", `"` + strings.Repeat("x", 8190) + `"`, strings.Repeat("x", 8190), false},
 		{"overflow", "application/json", `"` + strings.Repeat("x", 10000) + `"`, nil, true},
 		{"one-byte-over", "application/json", `"` + strings.Repeat("x", 8191) + `"`, nil, true},

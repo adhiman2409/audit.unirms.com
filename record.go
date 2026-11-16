@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type record struct {
@@ -56,10 +57,9 @@ func redact(value any) {
 	switch v := value.(type) {
 	case map[string]any:
 		for key, child := range v {
-			switch strings.ToLower(key) {
-			case "password", "token", "secret", "otp":
+			if sensitiveKey(key) {
 				v[key] = "[redacted]"
-			default:
+			} else {
 				redact(child)
 			}
 		}
@@ -68,4 +68,28 @@ func redact(value any) {
 			redact(child)
 		}
 	}
+}
+
+var sensitiveParts = []string{"password", "passwd", "secret", "token", "apikey", "privatekey", "accesskey", "credential"}
+
+// sensitiveKey matches a key after lower-casing it and dropping _ - . and spaces,
+// so smtp_password, apiKey and client-secret all match. "otp" only matches at
+// either end, so words that merely contain it (footprint) are kept.
+func sensitiveKey(key string) bool {
+	k := strings.Map(func(r rune) rune {
+		switch r {
+		case '_', '-', '.', ' ':
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, key)
+	if strings.HasPrefix(k, "otp") || strings.HasSuffix(k, "otp") {
+		return true
+	}
+	for _, part := range sensitiveParts {
+		if strings.Contains(k, part) {
+			return true
+		}
+	}
+	return false
 }

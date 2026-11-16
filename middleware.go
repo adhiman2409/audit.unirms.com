@@ -101,8 +101,13 @@ func (s *requestState) finish(w *writer, r *http.Request, name string) {
 	if s.config {
 		kind = "config"
 	}
-	forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
-	ip := strings.TrimSpace(forwarded)
+	// The right-most X-Forwarded-For entry is the one the edge proxy appended;
+	// entries to its left come from the client and can be forged.
+	ip := ""
+	if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
+		last := values[len(values)-1]
+		ip = strings.TrimSpace(last[strings.LastIndexByte(last, ',')+1:])
+	}
 	if ip == "" {
 		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
 	}

@@ -24,8 +24,10 @@ var (
 	lifecycleMu sync.Mutex
 	startOnce   sync.Once
 	lastWriter  *writer
-	reRaise     = func(sig os.Signal) {
-		signal.Reset(sig)
+	// reRaise sends sig again after the audit channel has stopped listening.
+	// If the service has its own handler, that handler gets it and its graceful
+	// shutdown runs; otherwise the default action ends the process.
+	reRaise = func(sig os.Signal) {
 		if s, ok := sig.(syscall.Signal); ok {
 			_ = syscall.Kill(syscall.Getpid(), s)
 		}
@@ -47,6 +49,7 @@ func Start(client *mongo.Client, service string) {
 			defer signal.Stop(signals)
 			select {
 			case sig := <-signals:
+				signal.Stop(signals)
 				handleSignal(sig)
 			case <-w.stop:
 			}

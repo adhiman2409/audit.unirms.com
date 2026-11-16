@@ -1,0 +1,84 @@
+# Audit trail viewer at https://audit.unirms.com (unp cluster).
+#
+# Create the sign-in secret once, before applying:
+#   microk8s kubectl create secret generic audit-viewer \
+#     --from-literal=username='<name>' --from-literal=password='<12+ characters>'
+#
+# It reads the same MongoDB as the services, with the same unisecret credentials.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-viewer-depl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audit-viewer
+  template:
+    metadata:
+      labels:
+        app: audit-viewer
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: audit-viewer
+          image: hs14/audit-viewer:0.1.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DB_ADDR
+              value: "mongodb://46.202.167.161:27017/?directConnection=true&serverSelectionTimeoutMS=2000&authSource=admin&appName=audit-viewer"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: unisecret, key: username }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: unisecret, key: password }
+            - name: AUDIT_UI_USER
+              valueFrom:
+                secretKeyRef: { name: audit-viewer, key: username }
+            - name: AUDIT_UI_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: audit-viewer, key: password }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-viewer-srv
+spec:
+  selector:
+    app: audit-viewer
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+# A named host wins over the *.unirms.com tenant wildcard ingress.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-audit
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: audit.unirms.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: audit-viewer-srv
+                port:
+                  number: 3000
+  tls:
+    - hosts:
+        - audit.unirms.com
+      secretName: unirms-wildcard-tls-secret

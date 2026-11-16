@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audit trail</title>
+<style>
+:root {
+  --ground: #edf0f3; --surface: #fff; --ink: #14212e; --muted: #5b6877; --line: #d8dee5;
+  --accent: #1d5c88; --accent-ink: #fff; --setting: #9a5a00; --setting-wash: #fdf4e3;
+  --fail: #b3261e; --ok: #2a7548; --hover: #f5f7f9;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #10171f; --surface: #18222d; --ink: #e6ebf0; --muted: #93a0ae; --line: #2a3643;
+    --accent: #6fb0dc; --accent-ink: #0c141c; --setting: #e0a84a; --setting-wash: #2a2416;
+    --fail: #f08a80; --ok: #6cc394; --hover: #1d2936;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+input, select { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; min-width: 0; }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 7px 14px; }
+button:hover { background: var(--hover); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.primary:hover { background: var(--accent); filter: brightness(1.1); }
+code, pre, .path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+
+/* Sign in */
+#signin { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+#signin form { width: min(360px, 100%); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 28px; display: grid; gap: 14px; }
+#signin h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+#signin p { margin: -8px 0 4px; color: var(--muted); }
+#signin label { display: grid; gap: 5px; font-weight: 600; font-size: 14px; }
+#signin-error { color: var(--fail); margin: 0; min-height: 1.45em; }
+
+/* App */
+header { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+.bar { max-width: 1180px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.bar h1 { font-size: 17px; margin: 0 6px 0 0; letter-spacing: -0.01em; }
+.bar .push { margin-left: auto; }
+.filters { border-top: 1px solid var(--line); }
+.filters input[type=search] { flex: 1 1 220px; }
+.kinds { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.kinds label { padding: 7px 12px; cursor: pointer; border-left: 1px solid var(--line); }
+.kinds label:first-child { border-left: 0; }
+.kinds input { position: absolute; opacity: 0; pointer-events: none; }
+.kinds label:has(:checked) { background: var(--accent); color: var(--accent-ink); }
+.kinds label:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.check { display: inline-flex; gap: 6px; align-items: center; }
+.check input { width: 16px; height: 16px; }
+
+main { max-width: 1180px; margin: 0 auto; padding: 8px 16px 48px; }
+#note { color: var(--muted); padding: 40px 0; text-align: center; }
+h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 22px 0 6px; }
+.day { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+details { border-top: 1px solid var(--line); border-left: 3px solid transparent; }
+details:first-child { border-top: 0; }
+details.setting { border-left-color: var(--setting); }
+summary { list-style: none; cursor: pointer; padding: 9px 14px 9px 11px; display: grid; gap: 2px 16px; align-items: baseline;
+  grid-template-columns: 5.2em minmax(0, 1.1fr) minmax(0, 1.6fr) 8.5em 3.2em 4.4em; }
+summary::-webkit-details-marker { display: none; }
+summary:hover, details[open] > summary { background: var(--hover); }
+.time, .ms { font-variant-numeric: tabular-nums; color: var(--muted); }
+.ms { text-align: right; }
+.who, .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who b, .what b { font-weight: 600; }
+.sub { display: block; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.service { color: var(--muted); }
+.status { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ok); }
+.status.fail { color: var(--fail); }
+.tag { color: var(--setting); background: var(--setting-wash); border-radius: 4px; padding: 1px 6px; font-size: 12px; font-weight: 600; margin-left: 8px; }
+.detail { padding: 6px 14px 16px calc(11px + 5.2em + 16px); background: var(--hover); }
+dl { margin: 0; display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 4px 16px; }
+dt { color: var(--muted); }
+dd { margin: 0; overflow-wrap: anywhere; }
+dd.fail { color: var(--fail); }
+pre { margin: 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  overflow: auto; max-height: 340px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#more { display: block; margin: 20px auto 0; }
+@media (max-width: 760px) {
+  summary { grid-template-columns: 5.2em minmax(0, 1fr) 3.2em; }
+  .who { grid-column: 2; } .what { grid-column: 2; grid-row: 2; }
+  .status { grid-column: 3; grid-row: 1; text-align: right; }
+  .service, .ms { display: none; }
+  .detail { padding-left: 14px; }
+  dl { grid-template-columns: 1fr; gap: 0; } dd { margin-bottom: 8px; }
+}
+</style>
+</head>
+<body>
+
+<div id="signin" hidden>
+  <form id="signin-form">
+    <h1>Audit trail</h1>
+    <p>Who changed what in UNIRMS, for the last 90 days.</p>
+    <label>Username <input name="username" autocomplete="username" required autofocus></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <p id="signin-error" role="alert"></p>
+    <button class="primary">Sign in</button>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <div class="bar">
+      <h1>Audit trail</h1>
+      <select id="tenant" aria-label="Organisation"></select>
+      <button id="reload" type="button">Refresh</button>
+      <button id="signout" type="button" class="push">Sign out</button>
+    </div>
+    <form class="bar filters" id="filters">
+      <span class="kinds" role="radiogroup" aria-label="Type of change">
+        <label><input type="radio" name="kind" value="" checked>All</label>
+        <label><input type="radio" name="kind" value="config">Settings</label>
+        <label><input type="radio" name="kind" value="request">Other changes</label>
+      </span>
+      <select name="service" aria-label="Service"><option value="">All services</option></select>
+      <input type="search" name="q" placeholder="Search person, email, action, path or IP" aria-label="Search">
+      <input type="date" name="from" aria-label="From date">
+      <input type="date" name="to" aria-label="To date">
+      <label class="check"><input type="checkbox" name="failed" value="1">Failed only</label>
+    </form>
+  </header>
+  <main>
+    <div id="list"></div>
+    <p id="note" role="status"></p>
+    <button id="more" type="button" hidden>Load older changes</button>
+  </main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+// Every value from the log goes through textContent here, never innerHTML.
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const filters = $('filters'), tenant = $('tenant'), list = $('list'), note = $('note'), more = $('more');
+let next = '', lastDay = '', dayBox = null, shown = 0, run = 0;
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (res.status === 401 && !path.endsWith('/login')) { show(false); throw new Error('signed out'); }
+  if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
+  return res.status === 204 ? null : res.json();
+}
+function show(signedIn) { $('app').hidden = !signedIn; $('signin').hidden = signedIn; }
+
+const words = s => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ').replace(/^(.)(.*)$/, (m, a, b) => a.toUpperCase() + b.toLowerCase());
+const dayOf = d => d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const timeOf = d => d.toLocaleTimeString(undefined, { hour12: false });
+
+function row(r) {
+  const at = new Date(r.at), d = el('details', r.kind === 'config' ? 'setting' : ''), s = el('summary');
+  s.append(el('span', 'time', timeOf(at)));
+  const who = el('span', 'who');
+  who.append(el('b', '', r.actor_name || r.actor_email || r.actor_id || 'Unknown person'),
+    el('span', 'sub', [r.actor_role, r.department].filter(Boolean).join(', ')));
+  const what = el('span', 'what');
+  what.append(el('b', '', r.route ? words(r.route) : r.method + ' ' + r.path));
+  if (r.kind === 'config') what.append(el('span', 'tag', 'Settings'));
+  what.append(el('span', 'sub path', r.method + ' ' + r.path));
+  s.append(who, what, el('span', 'service', r.service), el('span', 'status' + (r.status >= 400 ? ' fail' : ''), r.status), el('span', 'ms', r.duration_ms + ' ms'));
+  d.append(s);
+  d.addEventListener('toggle', () => { if (d.open && !d.querySelector('.detail')) d.append(detail(r, at)); });
+  return d;
+}
+
+function detail(r, at) {
+  const box = el('div', 'detail'), dl = el('dl');
+  const add = (label, value, cls) => { if (value) dl.append(el('dt', '', label), el('dd', cls, value)); };
+  add('Error', r.error, 'fail');
+  add('When', at.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' }));
+  add('Person', [r.actor_name, r.actor_email].filter(Boolean).join(', '));
+  add('Employee ID', r.actor_id);
+  add('Role', [r.actor_role, r.department].filter(Boolean).join(', '));
+  add('IP address', r.ip);
+  add('Request', r.method + ' ' + r.path, 'path');
+  add('Parameters', Object.entries(r.path_vars || {}).map(([k, v]) => k + ' = ' + v).join(', '));
+  add('Correlation ID', r.correlation_id, 'path');
+  if (r.body !== undefined) {
+    dl.append(el('dt', '', 'Sent data'));
+    const dd = el('dd'); dd.append(el('pre', '', JSON.stringify(r.body, null, 2))); dl.append(dd);
+  } else if (r.body_truncated) add('Sent data', 'Too large to keep (over 8 KB).');
+  box.append(dl);
+  return box;
+}
+
+async function load(reset) {
+  const mine = ++run;
+  if (reset) { next = ''; lastDay = ''; shown = 0; list.replaceChildren(); }
+  more.hidden = true; note.textContent = 'Loading…';
+  const f = new FormData(filters), q = new URLSearchParams({ db: tenant.value });
+  for (const k of ['kind', 'service', 'q', 'failed']) if (f.get(k)) q.set(k, f.get(k));
+  if (f.get('from')) q.set('from', new Date(f.get('from') + 'T00:00:00').toISOString());
+  if (f.get('to')) { const t = new Date(f.get('to') + 'T00:00:00'); t.setDate(t.getDate() + 1); q.set('to', t.toISOString()); }
+  if (next) q.set('before', next);
+  try {
+    const data = await api('/api/logs?' + q);
+    if (mine !== run) return;
+    for (const r of data.Rows) {
+      const day = dayOf(new Date(r.at));
+      if (day !== lastDay) { lastDay = day; dayBox = el('div', 'day'); list.append(el('h2', '', day), dayBox); }
+      dayBox.append(row(r));
+    }
+    shown += data.Rows.length; next = data.Next; more.hidden = !next;
+    note.textContent = shown ? (next ? '' : 'That is everything that matches.') : 'No changes match these filters. Widen the dates or clear the search.';
+  } catch (e) { if (mine === run && e.message !== 'signed out') note.textContent = 'Could not load: ' + e.message + '. Press Refresh to try again.'; }
+}
+
+async function loadServices() {
+  const select = filters.elements.service;
+  select.length = 1;
+  try { for (const s of (await api('/api/services?db=' + encodeURIComponent(tenant.value))).sort()) select.add(new Option(s, s)); } catch (e) {}
+}
+
+async function start() {
+  let names;
+  try { names = await api('/api/tenants'); } catch (e) {
+    if (e.message !== 'signed out') { show(true); note.textContent = 'Could not load: ' + e.message + '.'; }
+    return;
+  }
+  show(true);
+  tenant.replaceChildren();
+  // Database names are the domain with dots swapped for underscores; a hostname cannot hold an underscore.
+  for (const n of names.sort()) tenant.add(new Option(n.replaceAll('_', '.'), n));
+  let saved = null; try { saved = localStorage.getItem('tenant'); } catch (e) {}
+  if (names.includes(saved)) tenant.value = saved;
+  if (!names.length) { note.textContent = 'No organisation has audit records yet.'; return; }
+  loadServices(); load(true);
+}
+
+$('signin-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('signin-error').textContent = '';
+  try {
+    await api('/api/login', { method: 'POST', body: new URLSearchParams(new FormData(e.target)) });
+    e.target.reset(); start();
+  } catch (err) { $('signin-error').textContent = 'Wrong username or password.'; }
+});
+$('signout').addEventListener('click', async () => { await fetch('/api/logout', { method: 'POST' }); list.replaceChildren(); show(false); });
+$('reload').addEventListener('click', () => load(true));
+more.addEventListener('click', () => load(false));
+tenant.addEventListener('change', () => { try { localStorage.setItem('tenant', tenant.value); } catch (e) {} loadServices(); load(true); });
+filters.addEventListener('submit', e => { e.preventDefault(); load(true); });
+filters.addEventListener('change', () => load(true));
+let typing; filters.elements.q.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(() => load(true), 350); });
+start();
+</script>
+</body>
+</html>

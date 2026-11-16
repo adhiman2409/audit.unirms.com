@@ -19,8 +19,8 @@ spec:
       labels:
         app: audit-viewer
     spec:
-      imagePullSecrets:
-        - name: regcred
+      # No imagePullSecrets: the image is public, and the cluster's regcred
+      # token cannot pull from the hs14 account.
       containers:
         - name: audit-viewer
           image: hs14/audit-viewer:0.1.1

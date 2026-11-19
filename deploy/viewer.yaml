@@ -23,7 +23,7 @@ spec:
       # token cannot pull from the hs14 account.
       containers:
         - name: audit-viewer
-          image: hs14/audit-viewer:0.1.2
+          image: hs14/audit-viewer:0.1.3
           ports:
             - containerPort: 3000
           env:

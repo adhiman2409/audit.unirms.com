@@ -262,11 +262,21 @@ type badQuery string
 
 func (b badQuery) Error() string { return string(b) }
 
+// methodGroups maps the viewer's method filter to the HTTP methods it shows.
+var methodGroups = map[string]bson.A{
+	"get":    {"GET"},
+	"update": {"PUT", "PATCH"},
+	"delete": {"DELETE"},
+}
+
 // logFilter turns the query string into a Mongo filter. get is url.Values.Get.
 func logFilter(get func(string) string) (bson.D, error) {
 	filter := bson.D{}
 	if kind := get("kind"); kind == "config" || kind == "request" {
 		filter = append(filter, bson.E{Key: "kind", Value: kind})
+	}
+	if methods, ok := methodGroups[get("method")]; ok {
+		filter = append(filter, bson.E{Key: "method", Value: bson.D{{Key: "$in", Value: methods}}})
 	}
 	if service := get("service"); service != "" {
 		filter = append(filter, bson.E{Key: "service", Value: service})

@@ -36,8 +36,11 @@ func TestLogFilter(t *testing.T) {
 			t.Errorf("%v accepted", bad)
 		}
 	}
-	if f, _ := logFilter(url.Values{"kind": {"$ne"}}.Get); len(f) != 0 {
-		t.Errorf("unknown kind reached the filter: %v", f)
+	if f, _ := logFilter(url.Values{"kind": {"$ne"}, "method": {"$ne"}}.Get); len(f) != 0 {
+		t.Errorf("unknown kind or method reached the filter: %v", f)
+	}
+	if f, _ := logFilter(url.Values{"method": {"update"}}.Get); len(f) != 1 || f[0].Key != "method" {
+		t.Errorf("method filter = %v", f)
 	}
 }
 

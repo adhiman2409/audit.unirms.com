@@ -121,6 +121,12 @@ pre { margin: 0; padding: 10px 12px; background: var(--surface); border: 1px sol
         <label><input type="radio" name="kind" value="config">Settings</label>
         <label><input type="radio" name="kind" value="request">Other changes</label>
       </span>
+      <select name="method" aria-label="Call type">
+        <option value="">All calls</option>
+        <option value="get">Get</option>
+        <option value="update">Update</option>
+        <option value="delete">Delete</option>
+      </select>
       <select name="service" aria-label="Service"><option value="">All services</option></select>
       <input type="search" name="q" placeholder="Search person, email, action, path or IP" aria-label="Search">
       <input type="date" name="from" aria-label="From date">
@@ -195,7 +201,7 @@ async function load(reset) {
   if (reset) { next = ''; lastDay = ''; shown = 0; list.replaceChildren(); }
   more.hidden = true; note.textContent = 'Loading…';
   const f = new FormData(filters), q = new URLSearchParams({ db: tenant.value });
-  for (const k of ['kind', 'service', 'q', 'failed']) if (f.get(k)) q.set(k, f.get(k));
+  for (const k of ['kind', 'method', 'service', 'q', 'failed']) if (f.get(k)) q.set(k, f.get(k));
   if (f.get('from')) q.set('from', new Date(f.get('from') + 'T00:00:00').toISOString());
   if (f.get('to')) { const t = new Date(f.get('to') + 'T00:00:00'); t.setDate(t.getDate() + 1); q.set('to', t.toISOString()); }
   if (next) q.set('before', next);

@@ -24,7 +24,9 @@ full record. It only reads. Sign-in is one username and password from
 from the same `DB_ADDR`, `DB_PORT`, `DB_USER` and `DB_PASSWORD` the services use.
 The session cookie is `Secure`, so serve it over HTTPS (localhost also works).
 
+CI builds the image: a push to `dev` builds and deploys to the demo cluster, a
+push to `main` builds `pineswift/audit-viewer` for prod. Prod rollout is manual:
+
 ```bash
-docker buildx build --platform linux/amd64 --provenance=false --sbom=false -t hs14/audit-viewer:0.1.1 --push .
 microk8s kubectl apply -f deploy/viewer.yaml   # see the secret note at the top
 ```

@@ -1,0 +1,207 @@
+name: Build, Push and Deploy PROD-ENV
+
+# Builds the viewer image (cmd/viewer) only. Rolling it out to prod is manual.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # false on prod: cancelling mid-run can push an image without its git tag,
+  # or tag without notifying. Let prod builds finish and queue instead.
+  cancel-in-progress: false
+
+# ============================================
+# CONFIGURATION - Edit these variables below
+# ============================================
+env:
+  # Docker image settings (build job takes these as `with:` literals below -
+  # the env context is not available in jobs.<id>.with)
+  DOCKER_NAMESPACE: pineswift
+  DOCKER_REPO: audit-viewer
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Pushes the version git tag.
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.versioning.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Docker login
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Fetch tags
+        run: git fetch --tags
+
+      - name: Bump version
+        id: versioning
+        run: |
+          # Get latest tag version (default if none exist)
+          LATEST_TAG=$(git tag -l "PROD-*" --sort=-v:refname | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            CURRENT_VERSION="0.1.3"
+          else
+            CURRENT_VERSION="${LATEST_TAG#PROD-}"
+          fi
+
+          # Parse version
+          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+
+          # Bump patch
+          patch=$((patch + 1))
+
+          # Roll over to next minor if patch > 99
+          if [ "$patch" -gt 99 ]; then
+            patch=0
+            minor=$((minor + 1))
+          fi
+
+          NEW_VERSION="${major}.${minor}.${patch}"
+
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bumped version from $CURRENT_VERSION to $NEW_VERSION"
+
+      - name: Create Docker Hub repo if not exists
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          DOCKER_NAMESPACE: pineswift
+          DOCKER_REPO: audit-viewer
+        run: |
+          TOKEN=$(curl -fsS -H "Content-Type: application/json" -X POST \
+            -d "{\"username\":\"${DOCKER_USERNAME}\",\"password\":\"${DOCKER_PASSWORD}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+          curl -s -H "Authorization: JWT ${TOKEN}" -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"${DOCKER_REPO}\",\"namespace\":\"${DOCKER_NAMESPACE}\",\"is_private\":true}" \
+            https://hub.docker.com/v2/repositories/ || true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: pineswift/audit-viewer:${{ steps.versioning.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Set Docker Hub repo private
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          TOKEN=$(curl -fsS -H "Content-Type: application/json" -X POST \
+            -d "{\"username\":\"${DOCKER_USERNAME}\",\"password\":\"${DOCKER_PASSWORD}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Failed to obtain Docker Hub JWT" >&2
+            exit 1
+          fi
+          curl -fsS -H "Authorization: JWT ${TOKEN}" -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"is_private": true}' \
+            "https://hub.docker.com/v2/repositories/pineswift/audit-viewer/privacy/"
+
+      - name: Create Git tag
+        if: success()
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git tag PROD-${{ steps.versioning.outputs.version }}
+          git push origin PROD-${{ steps.versioning.outputs.version }}
+
+  notify:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    # Checkout for the commit message.
+    permissions:
+      contents: read
+    steps:
+      # Needed for `git log` below - this job does not inherit the build
+      # job's checkout.
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # - name: Send Google Chat notification
+      #   env:
+      #     DEPLOY_VERSION: ${{ needs.build.outputs.version }}
+      #     DEPLOY_STATUS: ${{ needs.build.result }}
+      #     WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}
+      #   run: |
+      #     SERVICE_NAME="${{ env.DOCKER_REPO }}"
+
+      #     # Determine emoji based on deployment status
+      #     if [ "$DEPLOY_STATUS" = "success" ]; then
+      #       EMOJI="🚀"
+      #     else
+      #       EMOJI="❌"
+      #     fi
+
+      #     # Build failed before the version was computed
+      #     if [ -z "$DEPLOY_VERSION" ]; then
+      #       DEPLOY_VERSION="unknown"
+      #     fi
+
+      #     COMMIT_MSG=$(git log -1 --pretty=%B | jq -Rs . | sed -e 's/^"//' -e 's/"$//')
+      #     FULL_IMAGE="${{ env.DOCKER_NAMESPACE }}/${{ env.DOCKER_REPO }}:${DEPLOY_VERSION}"
+      #     MESSAGE=$(cat <<EOF
+      #     {
+      #       "cards": [{
+      #         "header": {
+      #           "title": "${EMOJI} Build ${DEPLOY_STATUS} for Service: ${SERVICE_NAME}",
+      #           "subtitle": "Version: ${DEPLOY_VERSION}"
+      #         },
+      #         "sections": [{
+      #           "widgets": [
+      #             {
+      #               "textParagraph": {
+      #                 "text": "Commit: <code>${GITHUB_SHA}</code>"
+      #               }
+      #             },
+      #             {
+      #               "textParagraph": {
+      #                 "text": "<b>Release Notes:</b><br>${COMMIT_MSG}"
+      #               }
+      #             },
+      #             {
+      #               "textParagraph": {
+      #                 "text": "<b>Initiated by:</b> ${{ github.actor }}"
+      #               }
+      #             },
+      #             {
+      #               "textParagraph": {
+      #                 "text": "<b>Docker Image:</b> ${FULL_IMAGE}"
+      #               }
+      #             },
+      #             {
+      #               "textParagraph": {
+      #                 "text": "<b>Deploy:</b> <code>deploy ${DEPLOY_VERSION} service:${SERVICE_NAME}</code>"
+      #               }
+      #             }
+      #           ]
+      #         }]
+      #       }]
+      #     }
+      #     EOF
+      #     )
+      #     curl -X POST -H "Content-Type: application/json" \
+      #       -d "${MESSAGE}" "${WEBHOOK_URL}"

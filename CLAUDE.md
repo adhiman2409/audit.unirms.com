@@ -9,27 +9,25 @@ Two things live here:
 
 ## Deploying the viewer
 
-There is no CI for the viewer, and the server does not build it. The image is
-built locally, pushed to Docker Hub, and the cluster pulls it.
+CI builds the viewer image, same as the other UNIRMS services:
 
-1. Commit and push the change to `main`.
-2. Build and push a new tag. Never reuse a tag: the cluster will not re-pull it.
-   ```bash
-   docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
-     -t hs14/audit-viewer:<next version> --push .
-   ```
-   Keep `--provenance=false --sbom=false`: containerd on the unp cluster needs
-   a plain image manifest.
-3. Set `image: hs14/audit-viewer:<next version>` in `deploy/viewer.yaml` and
-   commit it.
-4. On the server: `microk8s kubectl apply -f deploy/viewer.yaml`.
-5. Check that https://audit.unirms.com serves the new page.
+- Push to `dev`: `cicd-dev.yaml` builds `pineswift/demo-audit-viewer:<DEV version>`
+  and deploys it to the demo cluster (file
+  `~/depl.jobs.pineswift.com/unirms.com/audit-viewer-depl.yaml` on the demo
+  server, source `deploy/viewer-demo.yaml`).
+- Push to `main`: `cicd-prod.yaml` builds `pineswift/audit-viewer:<PROD version>`
+  and posts it to Google Chat. It does not deploy.
 
-Docker Hub tags show what has been published:
-`https://hub.docker.com/v2/repositories/hs14/audit-viewer/tags`.
+Versions come from the `DEV-*` / `PROD-*` git tags CI creates. The library's
+`v*` tags are separate.
 
-The `hs14/audit-viewer` image is public, so the manifest has no
-`imagePullSecrets`. The cluster's `regcred` cannot pull from the hs14 account.
+Rolling a prod build out to https://audit.unirms.com (unp cluster) is manual:
+set `image: pineswift/audit-viewer:<version>` in `deploy/viewer.yaml`, commit
+it, and on the server run `microk8s kubectl apply -f deploy/viewer.yaml`.
+
+Build with `--provenance=false --sbom=false` (CI does): containerd on the
+clusters needs a plain image manifest. pineswift images are private and pulled
+with the clusters' `regcred`.
 
 ## Tenant-facing API
 

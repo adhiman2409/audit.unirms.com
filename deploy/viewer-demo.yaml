@@ -1,0 +1,65 @@
+# Audit trail viewer on the demo cluster. CI (cicd-dev.yaml) keeps a copy at
+# ~/depl.jobs.pineswift.com/unirms.com/audit-viewer-depl.yaml on the demo
+# server, bumps its image tag and applies it. No ingress yet: reach it with
+#   microk8s kubectl port-forward svc/audit-viewer-srv 3000:3000
+#
+# Create the sign-in secret once, before applying:
+#   microk8s kubectl create secret generic audit-viewer \
+#     --from-literal=username='<name>' --from-literal=password='<12+ characters>'
+#
+# It reads the same MongoDB as the services, with the same unisecret credentials.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-viewer-depl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audit-viewer
+  template:
+    metadata:
+      labels:
+        app: audit-viewer
+    spec:
+      # pineswift images are private; regcred pulls them. The older public
+      # hs14/audit-viewer images need no secret.
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: audit-viewer
+          image: pineswift/demo-audit-viewer:0.1.3
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DB_ADDR
+              valueFrom:
+                secretKeyRef: { name: unisecret, key: db_addr }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: unisecret, key: username }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: unisecret, key: password }
+            - name: AUDIT_UI_USER
+              valueFrom:
+                secretKeyRef: { name: audit-viewer, key: username }
+            - name: AUDIT_UI_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: audit-viewer, key: password }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-viewer-srv
+spec:
+  selector:
+    app: audit-viewer
+  ports:
+    - port: 3000
+      targetPort: 3000

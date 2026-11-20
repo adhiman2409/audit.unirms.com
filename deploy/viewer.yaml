@@ -19,8 +19,10 @@ spec:
       labels:
         app: audit-viewer
     spec:
-      # No imagePullSecrets: the image is public, and the cluster's regcred
-      # token cannot pull from the hs14 account.
+      # pineswift images are private; regcred pulls them. The older public
+      # hs14/audit-viewer images need no secret.
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: audit-viewer
           image: hs14/audit-viewer:0.1.3

@@ -139,6 +139,7 @@ func mongoInsert(client *mongo.Client) func(context.Context, string, []any) erro
 				{Keys: bson.D{{Key: "at", Value: -1}}, Options: options.Index().SetName("audit_by_time")},
 				{Keys: bson.D{{Key: "actor_id", Value: 1}, {Key: "at", Value: -1}}, Options: options.Index().SetName("audit_by_actor")},
 				{Keys: bson.D{{Key: "kind", Value: 1}, {Key: "at", Value: -1}}, Options: options.Index().SetName("audit_by_kind")},
+				{Keys: bson.D{{Key: "target_ids", Value: 1}, {Key: "at", Value: -1}}, Options: options.Index().SetName("audit_by_target")},
 				{Keys: bson.D{{Key: "at", Value: 1}}, Options: options.Index().SetName("audit_ttl_90d").SetExpireAfterSeconds(90 * 24 * 60 * 60)},
 			})
 			if err != nil {

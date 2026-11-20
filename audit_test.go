@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -470,5 +471,36 @@ func TestMiddlewareLifecycleAndAllocations(t *testing.T) {
 	wrapped.ServeHTTP(response, matched)
 	if called.Load() == 0 || len(sink.snapshot()) != 1 || sink.snapshot()[0].Route != "" {
 		t.Fatal("middleware lifecycle or unnamed route failed")
+	}
+}
+
+func TestTargetIDs(t *testing.T) {
+	var body any
+	if err := json.Unmarshal([]byte(`{"employee_id":"E1","employeeIds":["E2","E1"," "],"rows":[{"eid":"E3","manager_eid":"M1"}],"emp_id":7,"meta":{"Emp_Id":"E4"}}`), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := targetIDs(map[string]string{"eid": "E0", "id": "X"}, body), []string{"E0", "E1", "E2", "E3", "E4"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("targets=%v, want %v", got, want)
+	}
+	if got := targetIDs(nil, nil); got != nil {
+		t.Fatalf("no input gave %v", got)
+	}
+}
+
+func TestRequestRecordsTargetsWithoutBody(t *testing.T) {
+	sink := &recordSink{}
+	testWriter(t, time.Hour, sink.insert)
+	router := testRouter(Options{}, "update", func(w http.ResponseWriter, r *http.Request) {
+		if read, _ := io.ReadAll(r.Body); string(read) != `{"employee_id":"E9","note":"x"}` {
+			t.Errorf("handler body changed: %s", read)
+		}
+	})
+	r := request("POST", validClaims, `{"employee_id":"E9","note":"x"}`)
+	r.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), r)
+	Close(context.Background())
+	got := sink.snapshot()
+	if len(got) != 1 || got[0].Kind != "request" || got[0].Body != nil || !reflect.DeepEqual(got[0].TargetIDs, []string{"E9"}) {
+		t.Fatalf("record=%+v", got)
 	}
 }

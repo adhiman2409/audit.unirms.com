@@ -86,7 +86,9 @@ func prepareRequest(w http.ResponseWriter, r *http.Request, config bool) (state 
 		return nil
 	}
 	s.response = &statusWriter{ResponseWriter: w, status: http.StatusOK}
-	if config && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") && r.Body != nil {
+	// JSON bodies are copied for every recorded request: config routes store the
+	// body, and all routes scan it for the employees the call changed.
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") && r.Body != nil {
 		s.body = &bodyReader{ReadCloser: r.Body}
 		r.Body = s.body
 	}
@@ -128,7 +130,7 @@ func (s *requestState) finish(w *writer, r *http.Request, name string) {
 		rawError: s.response.firstWrite,
 	}
 	if s.body != nil {
-		rec.BodyTruncated = len(s.body.copied) > 8192
+		rec.BodyTruncated = s.config && len(s.body.copied) > maxBodyBytes
 		rec.rawBody = s.body.copied
 	}
 	w.offer(rec)
@@ -181,6 +183,11 @@ func (w *statusWriter) Flush() {
 	}
 }
 
+const (
+	maxBodyBytes = 8192      // largest config body stored
+	maxScanBytes = 64 * 1024 // largest body scanned for target employee ids
+)
+
 type bodyReader struct {
 	io.ReadCloser
 	copied []byte
@@ -191,7 +198,7 @@ func (b *bodyReader) Read(p []byte) (int, error) {
 	func() {
 		defer auditPanic()
 		keep := n
-		if remaining := 8193 - len(b.copied); keep > remaining {
+		if remaining := maxScanBytes + 1 - len(b.copied); keep > remaining {
 			keep = remaining
 		}
 		b.copied = append(b.copied, p[:keep]...)
